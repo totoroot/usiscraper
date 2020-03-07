@@ -34,7 +34,7 @@ def load_cfg(file):
     for key in config:
         if config[key] is None:
             config[key] = ''
-        elif ' ' in config[key]:
+        elif ' ' in str(config[key]):
             config[key] = config[key].replace(' ', '+')
     return config
 
