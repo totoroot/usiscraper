@@ -58,13 +58,10 @@ def scrape(url):
         return None
     try:
         req = request.Request(url)
-        #cj = cookiejar.FileCookieJar(filename="./cookie.txt")
-        #cp = request.HTTPCookieProcessor(cookiejar=cj)
         opener = request.build_opener()
         content = opener.open(req).read()
     except error.URLError as e:
-        sys.exit('Error: {}'.format(e.errno))
-        content = None
+        sys.exit(e)
     return content
 
 
