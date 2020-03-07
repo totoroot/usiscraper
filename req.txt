@@ -1,0 +1,5 @@
+pandas
+tabulate
+bs4
+datetime
+lxml
