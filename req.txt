@@ -1,5 +1,7 @@
+pyyaml
 pandas
 tabulate
 bs4
 datetime
 lxml
+html5lib
