@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
+#!./venv/bin/python
 
 import sys
 import yaml
 from datetime import datetime
 import urllib.request as request
 import urllib.error as error
-from http import cookiejar
 from bs4 import BeautifulSoup
 import pandas as pd
+import re
 from tabulate import tabulate
 
 
@@ -41,15 +41,15 @@ def load_cfg(file):
 
 def form_url(cfg):
     # form the correct url to query desired output
-    url = "https://usionline.uni-graz.at/usiweb/myusi.kurse?suche_in=go&sem_id_in={s1}&\
-sp_id_in=&kursbez_in={s2}&\
-kursleiter_in={s3}&\
-kursnr_in={s4}&\
-wt_in={s5}&\
-uhrzeit_von_in={s6}&\
-uhrzeit_bis_in={s7}&\
-suche_kursstaette_id_in={s8}".format(s1=cfg['semester'],s2=cfg['course'],s3=cfg['instructor'],
-s4=cfg['id'],s5=cfg['day'],s6=cfg['after'],s7=cfg['until'],s8=cfg['place'])
+    url = "https://usionline.uni-graz.at/usiweb/myusi.kurse?suche_in=go&sem_id_in={0}&\
+sp_id_in=&kursbez_in={1}&\
+kursleiter_in={2}&\
+kursnr_in={3}&\
+wt_in={4}&\
+uhrzeit_von_in={5}&\
+uhrzeit_bis_in={6}&\
+suche_kursstaette_id_in={7}".format(cfg['semester'],cfg['course'],cfg['instructor'],
+cfg['id'],cfg['day'],cfg['after'],cfg['until'],cfg['place'])
     return url
 
 
@@ -68,8 +68,7 @@ def scrape(url):
 def format(table):
     # get dataframe from list
     df = pd.read_html(str(table))[0]
-    num_rows, num_cols = df.shape
-    print(num_rows, num_cols)
+    num_rows, _ = df.shape
     # drop everything but the first seven columns
     df.drop(df.columns[7:], axis=1, inplace=True)
     for i in range(0, num_rows, 3):
@@ -84,12 +83,27 @@ def format(table):
     return df
 
 
+def report_free(df, file):
+    free = {}
+    index = 0
+    for value in df.iloc[:,0]:
+        if 'AUSG' not in str(value):
+            num_free = str(df.iloc[index, 8])
+            free[value] = int(re.search(r'\d+', num_free).group())
+        index += 1
+    with open(file, 'w') as f:
+        yaml.dump(free, f)
+
 if __name__ == '__main__':
     cfg = load_cfg('config.yml')
     url = form_url(cfg)
     content = scrape(url)
     soup = BeautifulSoup(content, "lxml")
     table = soup.find('table', {"id": "kursangebot"})
+    # format dataframe due to poor html implementation of USI website
     dataframe = format(table)
+
+    report_free(dataframe, 'free.yml')
+
     # print as formatted dataframe tabulated
     print(tabulate(dataframe, headers='keys', tablefmt='psql'))
