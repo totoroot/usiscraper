@@ -1,7 +1,9 @@
 #!./venv/bin/python
 
 import sys
+import argparse
 import yaml
+import json
 from datetime import datetime
 import urllib.request as request
 import urllib.error as error
@@ -22,11 +24,10 @@ def semester():
 
 def load_cfg(file):
     # load yaml config file safely
-    with open(file, 'r') as stream:
-        try:
-            config = yaml.safe_load(stream)
-        except yaml.YAMLError as exc:
-            print(exc)
+    try:
+        config = yaml.safe_load(file)
+    except yaml.YAMLError as exc:
+        print(exc)
     # get current semester if no entry in config
     if config['semester'] is None:
         config['semester'] = semester()
@@ -91,19 +92,34 @@ def report_free(df, file):
             num_free = str(df.iloc[index, 8])
             free[value] = int(re.search(r'\d+', num_free).group())
         index += 1
-    with open(file, 'w') as f:
-        yaml.dump(free, f)
+    if file.name.split(".")[-1] == 'json':
+        json.dump(free, file)
+    elif file.name.split(".")[-1] == 'yml' or file.name.split(".")[-1] == 'yaml':
+        yaml.dump(free, file)
+    else:
+        sys.exit('Error: YAML or JSON output supported only.')
 
 if __name__ == '__main__':
-    cfg = load_cfg('config.yml')
+    parser = argparse.ArgumentParser(description='USI Graz Webscraper')
+    parser.add_argument('-d', '--debug', action='store_true', help='print tabulated results and exit')
+    parser.add_argument('--input', nargs='?', type=argparse.FileType('r'), default='config.yml', help='YAML or JSON config input file')
+    parser.add_argument('--output', nargs='?', type=argparse.FileType('w'), default='free.json', help='YAML or JSON report output file')
+    args = parser.parse_args()
+
+    cfg = load_cfg(args.input)
+
     url = form_url(cfg)
+
     content = scrape(url)
+
     soup = BeautifulSoup(content, "lxml")
     table = soup.find('table', {"id": "kursangebot"})
+
     # format dataframe due to poor html implementation of USI website
     dataframe = format(table)
 
-    report_free(dataframe, 'free.yml')
-
-    # print as formatted dataframe tabulated
-    print(tabulate(dataframe, headers='keys', tablefmt='psql'))
+    # print as formatted dataframe tabulated for debugging purposes or export file
+    if args.debug:
+        print(tabulate(dataframe, headers='keys', tablefmt='psql'))
+    else :
+        report_free(dataframe, args.output)
