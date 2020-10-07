@@ -1,4 +1,4 @@
-#!./venv/bin/python
+#!/usr/bin/env python3
 
 import sys
 import argparse
@@ -43,16 +43,16 @@ def load_cfg(file):
 def form_url(cfg):
     # form the correct url to query desired output
     url = "https://usionline.uni-graz.at/usiweb/myusi.kurse?suche_in=go&sem_id_in={0}&\
-sp_id_in=&kursbez_in={1}&\
-kursleiter_in={2}&\
-kursnr_in={3}&\
-wt_in={4}&\
-uhrzeit_von_in={5}&\
-uhrzeit_bis_in={6}&\
-suche_kursstaette_id_in={7}".format(cfg['semester'],cfg['course'],cfg['instructor'],
-cfg['id'],cfg['day'],cfg['after'],cfg['until'],cfg['place'])
+sp_id_in={1}&\
+kursbez_in={2}&\
+kursleiter_in={3}&\
+kursnr_in={4}&\
+wt_in={5}&\
+uhrzeit_von_in={6}&\
+uhrzeit_bis_in={7}&\
+suche_kursstaette_id_in={8}".format(cfg['semester'],cfg['discipline'],cfg['course'],cfg['instructor'],
+cfg['id'],cfg['weekday'],cfg['after'],cfg['until'],cfg['location'])
     return url
-
 
 def scrape(url):
     if url is None:
@@ -78,7 +78,7 @@ def format(table):
         df.at[i, 'j'] = df.iloc[i+2,1]
     df = df[::3]
     # rename columns
-    df.columns = ['id', 'course', 'time', 'place', 'rate_a', 'rate_b', 'rate_c', 'instructor', 'num_free', 'text_free']
+    df.columns = ['id', 'course', 'time', 'location', 'rate_a', 'rate_b', 'rate_c', 'instructor', 'num_free', 'text_free']
     # reset row indices
     df.reset_index(drop=True, inplace=True)
     return df
@@ -117,6 +117,8 @@ if __name__ == '__main__':
 
     # format dataframe due to poor html implementation of USI website
     dataframe = format(table)
+
+    print(dataframe)
 
     # print as formatted dataframe tabulated for debugging purposes or export file
     if args.debug:
