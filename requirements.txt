@@ -5,3 +5,5 @@ tabulate
 bs4
 datetime
 lxml
+python-dotenv
+influxdb

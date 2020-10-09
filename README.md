@@ -27,3 +27,11 @@ weekday: mo
 after: 15:15
 until: 19:30
 location: hallenbad
+
+## InfluxDB Environment Variables
+
+INFLUXDB_ADDRESS=
+INFLUXDB_PORT=
+INFLUXDB_USER=
+INFLUXDB_PASSWORD=
+INFLUXDB_DATABASE=

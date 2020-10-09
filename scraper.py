@@ -11,8 +11,38 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import re
 from tabulate import tabulate
+import os
+from dotenv import load_dotenv
+import time
+from datetime import timezone
+from influxdb import InfluxDBClient
 
 
+load_dotenv()
+
+# InfluxDB settings
+DB_ADDRESS = os.environ.get('INFLUXDB_ADDRESS')
+DB_PORT = int(os.environ.get('INFLUXDB_PORT'))
+DB_USER = os.environ.get('INFLUXDB_USER')
+DB_PASSWORD = os.environ.get('INFLUXDB_PASSWORD')
+DB_DATABASE = os.environ.get('INFLUXDB_DATABASE')
+
+# create InfluxDB client
+client = InfluxDBClient(
+    DB_ADDRESS, DB_PORT, DB_USER, DB_PASSWORD, None)
+
+
+# create database if it does not exist yet
+def init_db():
+    databases = client.get_list_database()
+
+    if len(list(filter(lambda x: x['name'] == DB_DATABASE, databases))) == 0:
+        client.create_database(
+            DB_DATABASE)
+    else:
+        client.switch_database(DB_DATABASE)
+
+# form semester string
 def semester():
     year = datetime.now().strftime('%Y')
     month = int(datetime.now().strftime('%m'))
@@ -42,7 +72,8 @@ def load_cfg(file):
 
 def form_url(cfg):
     # form the correct url to query desired output
-    url = "https://usionline.uni-graz.at/usiweb/myusi.kurse?suche_in=go&sem_id_in={0}&\
+    url = "https://usionline.uni-graz.at/usiweb/myusi.kurse?suche_in=go&\
+sem_id_in={0}&\
 sp_id_in={1}&\
 kursbez_in={2}&\
 kursleiter_in={3}&\
@@ -54,6 +85,7 @@ suche_kursstaette_id_in={8}".format(cfg['semester'],cfg['discipline'],cfg['cours
 cfg['id'],cfg['weekday'],cfg['after'],cfg['until'],cfg['location'])
     return url
 
+
 def scrape(url):
     if url is None:
         return None
@@ -63,7 +95,8 @@ def scrape(url):
         content = opener.open(req).read()
     except error.URLError as e:
         sys.exit(e)
-    return content
+    timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    return content, timestamp
 
 
 def format(table):
@@ -99,9 +132,39 @@ def report_free(df, file):
     else:
         sys.exit('Error: YAML or JSON output supported only.')
 
-if __name__ == '__main__':
+
+def report_influx(df, ts):
+    free = {}
+    index = 0
+    for value in df.iloc[:,0]:
+        if 'AUSG' in str(value):
+            value = str(value).replace('AUSG', '')
+        num_free = str(df.iloc[index, 8])
+        free[value] = int(re.search(r'\d+', num_free).group())
+        index += 1
+    
+    free_influx = []
+    for key, value in free.items():
+        free_influx.append(
+            {
+                'measurement': "free",
+                'tags': {
+                    'course': str(key)
+                },
+                'time': ts,
+                'fields': {
+                    'value': int(value)
+                }
+            }
+        )
+    
+    client.write_points(free_influx)
+    result = client.query('select value from free;')
+
+def main():
     parser = argparse.ArgumentParser(description='USI Graz Webscraper')
     parser.add_argument('-d', '--debug', action='store_true', help='print tabulated results and exit')
+    parser.add_argument('-i', '--influx', action='store_true', help='write free spaces to InfluxDB specified in .env')
     parser.add_argument('--input', nargs='?', type=argparse.FileType('r'), default='config.yml', help='YAML or JSON config input file')
     parser.add_argument('--output', nargs='?', type=argparse.FileType('w'), default='free.json', help='YAML or JSON report output file')
     args = parser.parse_args()
@@ -110,7 +173,7 @@ if __name__ == '__main__':
 
     url = form_url(cfg)
 
-    content = scrape(url)
+    content, timestamp = scrape(url)
 
     soup = BeautifulSoup(content, "lxml")
     table = soup.find('table', {"id": "kursangebot"})
@@ -118,10 +181,16 @@ if __name__ == '__main__':
     # format dataframe due to poor html implementation of USI website
     dataframe = format(table)
 
-    print(dataframe)
-
-    # print as formatted dataframe tabulated for debugging purposes or export file
+    # print as formatted dataframe tabulated for debugging purposes or send to InfluxDB and export file
     if args.debug:
         print(tabulate(dataframe, headers='keys', tablefmt='psql'))
-    else :
-        report_free(dataframe, args.output)
+    if args.influx:
+        init_db()
+        report_influx(dataframe, timestamp)
+    report_free(dataframe, args.output)
+    return('Success')
+
+
+if __name__ == '__main__':
+    print('Reporting USI Vacancies')
+    main()
