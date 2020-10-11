@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/matthias/usiscraper/venv/bin/python
 
 import sys
 import argparse
@@ -55,19 +55,19 @@ def semester():
 def load_cfg(file):
     # load yaml config file safely
     try:
-        config = yaml.safe_load(file)
+        cfg = yaml.safe_load(file)
     except yaml.YAMLError as exc:
         print(exc)
     # get current semester if no entry in config
-    if config['semester'] is None:
-        config['semester'] = semester()
+    if cfg['semester'] is None:
+        cfg['semester'] = semester()
     # replace None values with empty strings and whitespace by '+'
-    for key in config:
-        if config[key] is None:
-            config[key] = ''
-        elif ' ' in str(config[key]):
-            config[key] = config[key].replace(' ', '+')
-    return config
+    for key in cfg:
+        if cfg[key] is None:
+            cfg[key] = ''
+        elif ' ' in str(cfg[key]):
+            cfg[key] = cfg[key].replace(' ', '+')
+    return cfg
 
 
 def form_url(cfg):
@@ -95,8 +95,7 @@ def scrape(url):
         content = opener.open(req).read()
     except error.URLError as e:
         sys.exit(e)
-    timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    return content, timestamp
+    return content
 
 
 def format(table):
@@ -162,18 +161,26 @@ def report_influx(df, ts):
     result = client.query('select value from free;')
 
 def main():
+
+    abs_file_path = os.path.abspath(__file__)
+    path, filename = os.path.split(abs_file_path)
+
     parser = argparse.ArgumentParser(description='USI Graz Webscraper')
     parser.add_argument('-d', '--debug', action='store_true', help='print tabulated results and exit')
     parser.add_argument('-i', '--influx', action='store_true', help='write free spaces to InfluxDB specified in .env')
-    parser.add_argument('--input', nargs='?', type=argparse.FileType('r'), default='config.yml', help='YAML or JSON config input file')
-    parser.add_argument('--output', nargs='?', type=argparse.FileType('w'), default='free.json', help='YAML or JSON report output file')
+    parser.add_argument('--input', nargs='?', type=argparse.FileType('r'), default=str(os.path.join(path, 'config.yml')), help='YAML or JSON config input file')
+    parser.add_argument('--output', nargs='?', type=argparse.FileType('w'), default=str(os.path.join(path, 'free.json')), help='YAML or JSON report output file')
     args = parser.parse_args()
 
     cfg = load_cfg(args.input)
 
     url = form_url(cfg)
 
-    content, timestamp = scrape(url)
+    timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    print('{} - Starting to scrape...'.format(timestamp))
+
+    content = scrape(url)
 
     soup = BeautifulSoup(content, "lxml")
     table = soup.find('table', {"id": "kursangebot"})
@@ -188,9 +195,8 @@ def main():
         init_db()
         report_influx(dataframe, timestamp)
     report_free(dataframe, args.output)
-    return('Success')
+    return('{} - Done!'.format(timestamp))
 
 
 if __name__ == '__main__':
-    print('Reporting USI Vacancies')
-    main()
+    print(main())
