@@ -1,5 +1,15 @@
+# ide config files
 .idea
 .vscode
+
+# python virtual environment
 venv
+
+# output file
 free.json
+
+# enviroment variable file
 .env
+
+# log file
+scraper.log
