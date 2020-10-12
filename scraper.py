@@ -1,4 +1,4 @@
-#!/home/matthias/usiscraper/venv/bin/python
+#!/usr/bin/env python3
 
 import sys
 import argparse
@@ -18,32 +18,33 @@ from datetime import timezone
 from influxdb import InfluxDBClient
 
 
-load_dotenv()
+def init_influx():
+    """Initialize InfluxDB client and create database if it does not exist yet."""
+    # load environment variables from .env file
+    load_dotenv()
 
-# InfluxDB settings
-DB_ADDRESS = os.environ.get('INFLUXDB_ADDRESS')
-DB_PORT = int(os.environ.get('INFLUXDB_PORT'))
-DB_USER = os.environ.get('INFLUXDB_USER')
-DB_PASSWORD = os.environ.get('INFLUXDB_PASSWORD')
-DB_DATABASE = os.environ.get('INFLUXDB_DATABASE')
+    # InfluxDB settings
+    DB_ADDRESS = os.environ.get('INFLUXDB_ADDRESS')
+    DB_PORT = int(os.environ.get('INFLUXDB_PORT'))
+    DB_USER = os.environ.get('INFLUXDB_USER')
+    DB_PASSWORD = os.environ.get('INFLUXDB_PASSWORD')
+    DB_DATABASE = os.environ.get('INFLUXDB_DATABASE')
 
-# create InfluxDB client
-client = InfluxDBClient(
-    DB_ADDRESS, DB_PORT, DB_USER, DB_PASSWORD, None)
+    # create InfluxDB client
+    cl = InfluxDBClient(
+        DB_ADDRESS, DB_PORT, DB_USER, DB_PASSWORD, None)
 
-
-# create database if it does not exist yet
-def init_db():
-    databases = client.get_list_database()
-
+    databases = cl.get_list_database()
     if len(list(filter(lambda x: x['name'] == DB_DATABASE, databases))) == 0:
-        client.create_database(
+        cl.create_database(
             DB_DATABASE)
     else:
-        client.switch_database(DB_DATABASE)
+        cl.switch_database(DB_DATABASE)
+    return(cl)
 
-# form semester string
+
 def semester():
+    """Form semester string."""
     year = datetime.now().strftime('%Y')
     month = int(datetime.now().strftime('%m'))
     if 2 <= month < 9:
@@ -52,7 +53,9 @@ def semester():
         semester = year + "W"
     return semester
 
+
 def load_cfg(file):
+    """Load and parse config."""
     # load yaml config file safely
     try:
         cfg = yaml.safe_load(file)
@@ -71,7 +74,7 @@ def load_cfg(file):
 
 
 def form_url(cfg):
-    # form the correct url to query desired output
+    """Form correct url to query desired output."""
     url = "https://usionline.uni-graz.at/usiweb/myusi.kurse?suche_in=go&\
 sem_id_in={0}&\
 sp_id_in={1}&\
@@ -87,6 +90,7 @@ cfg['id'],cfg['weekday'],cfg['after'],cfg['until'],cfg['location'])
 
 
 def scrape(url):
+    """Scrape USI webpage for HTML content."""
     if url is None:
         return None
     try:
@@ -99,6 +103,7 @@ def scrape(url):
 
 
 def format(table):
+    """Extract dataframe from HTML content."""
     # get dataframe from list
     df = pd.read_html(str(table))[0]
     num_rows, _ = df.shape
@@ -117,6 +122,8 @@ def format(table):
 
 
 def report_free(df, file):
+    """Report vacancies and write to specified file."""
+    # remove all fully booked courses and populate dictionary with vacancies
     free = {}
     index = 0
     for value in df.iloc[:,0]:
@@ -124,6 +131,7 @@ def report_free(df, file):
             num_free = str(df.iloc[index, 8])
             free[value] = int(re.search(r'\d+', num_free).group())
         index += 1
+        # write to file
     if file.name.split(".")[-1] == 'json':
         json.dump(free, file)
     elif file.name.split(".")[-1] == 'yml' or file.name.split(".")[-1] == 'yaml':
@@ -132,7 +140,9 @@ def report_free(df, file):
         sys.exit('Error: YAML or JSON output supported only.')
 
 
-def report_influx(df, ts):
+def report_influx(cl, df, ts):
+    """Report vacancies to InfluxDB."""
+    # remove "AUSG" from course ID and populate dictionary with all courses and open spots
     free = {}
     index = 0
     for value in df.iloc[:,0]:
@@ -141,7 +151,7 @@ def report_influx(df, ts):
         num_free = str(df.iloc[index, 8])
         free[value] = int(re.search(r'\d+', num_free).group())
         index += 1
-    
+    # translate vacancies to InfluxDB line protocol with UTC timestamp
     free_influx = []
     for key, value in free.items():
         free_influx.append(
@@ -156,47 +166,46 @@ def report_influx(df, ts):
                 }
             }
         )
-    
-    client.write_points(free_influx)
-    result = client.query('select value from free;')
+    # write to database
+    cl.write_points(free_influx)
+
 
 def main():
-
+    """Main"""
+    # get path of python script
     abs_file_path = os.path.abspath(__file__)
     path, filename = os.path.split(abs_file_path)
-
+    # parse arguments
     parser = argparse.ArgumentParser(description='USI Graz Webscraper')
     parser.add_argument('-d', '--debug', action='store_true', help='print tabulated results and exit')
     parser.add_argument('-i', '--influx', action='store_true', help='write free spaces to InfluxDB specified in .env')
     parser.add_argument('--input', nargs='?', type=argparse.FileType('r'), default=str(os.path.join(path, 'config.yml')), help='YAML or JSON config input file')
     parser.add_argument('--output', nargs='?', type=argparse.FileType('w'), default=str(os.path.join(path, 'free.json')), help='YAML or JSON report output file')
     args = parser.parse_args()
-
+    # load config file
     cfg = load_cfg(args.input)
-
+    # get USI URL to query
     url = form_url(cfg)
-
-    timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-
-    print('{} - Starting to scrape...'.format(timestamp))
-
+    # query URL, scrape and format as table
+    print('{} - Starting to scrape...'.format(datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')))
     content = scrape(url)
-
     soup = BeautifulSoup(content, "lxml")
     table = soup.find('table', {"id": "kursangebot"})
-
     # format dataframe due to poor html implementation of USI website
     dataframe = format(table)
-
     # print as formatted dataframe tabulated for debugging purposes or send to InfluxDB and export file
     if args.debug:
+        # print table to STDOUT
         print(tabulate(dataframe, headers='keys', tablefmt='psql'))
     if args.influx:
-        init_db()
-        report_influx(dataframe, timestamp)
+        # send data to InfluxDB
+        client = init_influx()
+        timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        report_influx(client, dataframe, timestamp)
+    # write vacancies to file
     report_free(dataframe, args.output)
-    return('{} - Done!'.format(timestamp))
+    print('{} - Done!'.format(timestamp))
 
 
 if __name__ == '__main__':
-    print(main())
+    main()
